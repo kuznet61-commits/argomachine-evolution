@@ -1,0 +1,619 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Argo10_correct.py – правильная реализация Argo10 в соответствии со статьёй.
+Включает эволюционирующий пул оракулов, семантическое пространство,
+интеллектуальный выбор оракула, обогащение лент и транпозицию.
+"""
+
+import random
+import statistics
+import math
+import re
+from typing import List, Tuple, Optional, Dict
+import matplotlib.pyplot as plt
+import numpy as np
+
+# ------------------------------------------------------------------
+# Базовые утилиты
+# ------------------------------------------------------------------
+def find_matches(w: str, tape: str) -> List[int]:
+    """Возвращает индексы всех вхождений слова w в ленту tape."""
+    if len(w) == 0:
+        return []
+    matches = []
+    for i in range(len(tape) - len(w) + 1):
+        if tape[i:i+len(w)] == w:
+            matches.append(i)
+    return matches
+
+def random_paste(frags: List[str]) -> str:
+    """Случайно склеивает фрагменты с возможностью инверсии."""
+    if not frags:
+        return ""
+    first = frags[0]
+    rest = frags[1:]
+    random.shuffle(rest)
+    processed_rest = []
+    for frag in rest:
+        if random.random() < 0.3 and len(frag) > 1:
+            processed_rest.append(frag[::-1])
+        else:
+            processed_rest.append(frag)
+    return first + ''.join(processed_rest)
+
+# ------------------------------------------------------------------
+# Семантический вектор для оракула
+# ------------------------------------------------------------------
+def compute_semantic_vector(word: str) -> List[float]:
+    """Вычисляет вектор признаков для оракульного слова."""
+    if not word:
+        return [0.0] * 8
+    # Признаки: длина, уникальность, отношение гласных/согласных,
+    # наличие структурных символов, палиндромность и т.д.
+    vowels = set('AEIOU')
+    consonants = set('BCDFG')
+    structural = set('<>')
+    
+    features = []
+    features.append(len(word))
+    features.append(len(set(word)) / len(word) if len(word) > 0 else 0)
+    v_count = sum(1 for c in word if c in vowels)
+    c_count = sum(1 for c in word if c in consonants)
+    features.append(v_count / (c_count + 1))
+    features.append(sum(1 for c in word if c in structural) / len(word))
+    features.append(1.0 if word == word[::-1] else 0.0)
+    # Гистограмма частот символов (для A, B, C, D, E, F, <, >)
+    alphabet = "ABCDEFG<>"
+    freq = [word.count(c) / len(word) for c in alphabet]
+    features.extend(freq)
+    return features
+
+def cosine_similarity(v1: List[float], v2: List[float]) -> float:
+    """Косинусное сходство между двумя векторами."""
+    if not v1 or not v2:
+        return 0.0
+    # Дополняем векторы до одинаковой длины
+    if len(v1) < len(v2):
+        v1 = v1 + [0.0] * (len(v2) - len(v1))
+    elif len(v2) < len(v1):
+        v2 = v2 + [0.0] * (len(v1) - len(v2))
+    dot = sum(a * b for a, b in zip(v1, v2))
+    norm1 = math.sqrt(sum(a * a for a in v1))
+    norm2 = math.sqrt(sum(b * b for b in v2))
+    if norm1 == 0 or norm2 == 0:
+        return 0.0
+    return dot / (norm1 * norm2)
+
+# ------------------------------------------------------------------
+# Эволюционирующий оракул
+# ------------------------------------------------------------------
+class EvolutionaryOracle:
+    def __init__(self, word: str):
+        self.word = word
+        self.fitness = 0.5
+        self.success_count = 0
+        self.usage_count = 0
+        self.specialization = ""  # среда, для которой он наиболее эффективен
+        self.generation = 0
+        self.semantic_vector = compute_semantic_vector(word)
+        self.age = 0  # количество эпох с момента создания
+
+    def update_fitness(self):
+        """Обновляет пригодность оракула."""
+        if self.usage_count > 0:
+            self.fitness = self.success_count / self.usage_count
+        else:
+            self.fitness = 0.5  # нейтральное значение
+
+    def increment_usage(self, success: bool):
+        """Увеличивает счётчик использования и успехов."""
+        self.usage_count += 1
+        if success:
+            self.success_count += 1
+        self.update_fitness()
+        self.age += 1
+
+    def get_specialization_bonus(self, env: str) -> float:
+        """Бонус за специализацию к данной среде."""
+        if self.specialization == env:
+            return 1.0
+        return 0.0
+
+    def __repr__(self):
+        return f"Oracle('{self.word}', fitness={self.fitness:.2f}, usage={self.usage_count})"
+
+# ------------------------------------------------------------------
+# Функции мутации и кроссовера оракулов
+# ------------------------------------------------------------------
+def mutate_oracle(word: str, rate: float = 0.3) -> str:
+    """Мутирует оракульное слово."""
+    if random.random() > rate or len(word) == 0:
+        return word
+    alphabet = "ABCDEFG<>"
+    op = random.choice(['ins', 'del', 'chg', 'extend'])
+    if op == 'ins' and len(word) < 5:
+        pos = random.randint(0, len(word))
+        return word[:pos] + random.choice(alphabet) + word[pos:]
+    elif op == 'del' and len(word) > 1:
+        pos = random.randint(0, len(word) - 1)
+        return word[:pos] + word[pos+1:]
+    elif op == 'extend' and len(word) < 5:
+        return word + random.choice(alphabet)
+    else:  # chg
+        pos = random.randint(0, len(word) - 1)
+        return word[:pos] + random.choice(alphabet) + word[pos+1:]
+
+def crossover_oracles(w1: str, w2: str) -> str:
+    """Кроссовер между двумя оракулами (одноточечный)."""
+    if len(w1) < 2 or len(w2) < 2:
+        return random.choice([w1, w2])
+    pos1 = random.randint(1, len(w1) - 1)
+    pos2 = random.randint(1, len(w2) - 1)
+    child1 = w1[:pos1] + w2[pos2:]
+    child2 = w2[:pos2] + w1[pos1:]
+    return random.choice([child1, child2])
+
+def oracle_ok(w: str) -> bool:
+    """Проверяет, что слово состоит из символов алфавита."""
+    return set(w).issubset(set("ABCDEFG<>")) and 1 <= len(w) <= 5
+
+def safe_mutate_oracle(w: str, rate: float = 0.3) -> str:
+    """Безопасно мутирует оракул."""
+    attempts = 0
+    while attempts < 10:
+        new_w = mutate_oracle(w, rate)
+        if oracle_ok(new_w):
+            return new_w
+        attempts += 1
+    return w
+
+def safe_crossover_oracles(w1: str, w2: str) -> str:
+    """Безопасно выполняет кроссовер оракулов."""
+    attempts = 0
+    while attempts < 10:
+        new_w = crossover_oracles(w1, w2)
+        if oracle_ok(new_w):
+            return new_w
+        attempts += 1
+    return random.choice([w1, w2])
+
+# ------------------------------------------------------------------
+# Агент Argonaut (с ослабленным критерием принятия)
+# ------------------------------------------------------------------
+class Argonaut:
+    def __init__(self, tape: str):
+        self.tape = tape
+        self.accept_count = 0
+        self.generation = 0
+
+    def run(self, w: str, env: str) -> Tuple[str, str]:
+        """Алгоритм с ослабленным критерием: достаточно одного совпадения с оракулом."""
+        # 1. Найти вхождения оракульного слова
+        matches = find_matches(w, self.tape)
+        
+        # 2. Если вхождений меньше 1 -> reject (ослабленный критерий!)
+        if len(matches) < 1:
+            return "reject", self.tape
+
+        # 3. Разрезать ленту в позициях совпадения
+        frags = []
+        last_idx = 0
+        for match_start in matches:
+            frags.append(self.tape[last_idx:match_start])
+            last_idx = match_start
+        frags.append(self.tape[last_idx:])
+
+        # 4. Произвольно склеить фрагменты
+        new_tape = random_paste(frags)
+        
+        # 5. Ограничение длины
+        if len(new_tape) > 50:
+            new_tape = new_tape[:50]
+        
+        # 6. УСПЕХ: если среда содержится в ленте (мягкое соответствие)
+        #    В оригинальном Argo10 используется простое вхождение.
+        if env in new_tape:
+            self.generation += 1
+            return "accept", new_tape
+        else:
+            return "loop", new_tape
+
+# ------------------------------------------------------------------
+# ArgoMachine с пулом оракулов и интеллектуальным выбором
+# ------------------------------------------------------------------
+class ArgoMachine:
+    def __init__(self, agents: List[Argonaut], oracle_pool: List[EvolutionaryOracle]):
+        self.agents = agents
+        self.oracle_pool = oracle_pool
+        self.last_winner: Optional[Argonaut] = None
+        self.last_oracle: Optional[EvolutionaryOracle] = None
+        self.current_env = ""
+
+    def select_oracle(self, env: str) -> EvolutionaryOracle:
+        """Интеллектуальный выбор оракула для данной среды."""
+        env_vector = compute_semantic_vector(env)
+        best = None
+        best_score = -1
+        
+        for oracle in self.oracle_pool:
+            # Взвешенная оценка
+            sim_score = cosine_similarity(oracle.semantic_vector, env_vector)
+            fitness_score = oracle.fitness
+            freshness_score = 1.0 / (oracle.age + 1)  # предпочтение новым
+            spec_score = oracle.get_specialization_bonus(env)
+            
+            # Веса: 0.4 семантика, 0.3 пригодность, 0.2 свежесть, 0.1 специализация
+            score = (0.4 * sim_score +
+                     0.3 * fitness_score +
+                     0.2 * freshness_score +
+                     0.1 * spec_score)
+            
+            if score > best_score:
+                best_score = score
+                best = oracle
+        
+        return best
+
+    def step(self, env: str) -> str:
+        """Один шаг: выбрать оракул, попробовать всех агентов."""
+        # Выбираем оракула
+        oracle = self.select_oracle(env)
+        self.last_oracle = oracle
+        self.current_env = env
+        
+        if oracle is None:
+            return "reject"
+        
+        w = oracle.word
+        acceptors = []
+        
+        for ag in self.agents:
+            st, new_tape = ag.run(w, env)
+            ag.tape = new_tape
+            
+            if st == "accept":
+                acceptors.append(ag)
+                ag.accept_count += 1
+                # Оракул получает успех
+                oracle.increment_usage(success=True)
+            else:
+                oracle.increment_usage(success=False)
+
+        if acceptors:
+            # Выбираем победителя (максимальное поколение)
+            winner = max(acceptors, key=lambda x: x.generation)
+            self.last_winner = winner
+            return "accept"
+        return "reject"
+
+    def transpose(self) -> None:
+        """Транспозиция: копируем ленту победителя всем агентам."""
+        if self.last_winner is not None:
+            winning_tape = self.last_winner.tape
+            for ag in self.agents:
+                if random.random() < 0.8:  # 80% точная копия
+                    ag.tape = winning_tape
+                else:  # 20% с мутацией
+                    ag.tape = self._mutate_tape(winning_tape)
+
+    def _mutate_tape(self, tape: str) -> str:
+        """Мутация ленты для поддержания разнообразия."""
+        if len(tape) <= 1:
+            return tape
+        op = random.choice(['ins', 'del', 'swap'])
+        alphabet = "ABCDEFG<>"
+        if op == 'ins' and len(tape) < 40:
+            pos = random.randint(0, len(tape))
+            return tape[:pos] + random.choice(alphabet) + tape[pos:]
+        elif op == 'del' and len(tape) > 10:
+            pos = random.randint(0, len(tape) - 1)
+            return tape[:pos] + tape[pos+1:]
+        else:
+            if len(tape) >= 2:
+                pos = random.randint(0, len(tape) - 2)
+                return tape[:pos] + tape[pos+1] + tape[pos] + tape[pos+2:]
+        return tape
+
+    def evolve_oracles(self) -> None:
+        """Эволюция пула оракулов: мутация и кроссовер успешных."""
+        # Обновляем пригодность всех оракулов
+        for oracle in self.oracle_pool:
+            oracle.update_fitness()
+        
+        # Фильтруем: удаляем очень плохие (fitness < 0.1 и usage > 5)
+        self.oracle_pool = [o for o in self.oracle_pool 
+                            if o.fitness >= 0.1 or o.usage_count <= 5]
+        
+        # Если пул слишком мал, добавляем новые случайные оракулы
+        while len(self.oracle_pool) < 10:
+            new_word = random.choice(["A", "B", "C", "D", "E", "F", "<", ">"])
+            self.oracle_pool.append(EvolutionaryOracle(new_word))
+        
+        # Успешные оракулы (fitness > 0.6)
+        successful = [o for o in self.oracle_pool if o.fitness > 0.6]
+        
+        # Кроссовер между успешными
+        if len(successful) >= 2:
+            for i in range(len(successful) // 2):
+                p1 = successful[i]
+                p2 = successful[-(i+1)]
+                child_word = safe_crossover_oracles(p1.word, p2.word)
+                child = EvolutionaryOracle(child_word)
+                child.generation = max(p1.generation, p2.generation) + 1
+                # Специализация: копируем специализацию лучшего родителя
+                child.specialization = p1.specialization if p1.fitness > p2.fitness else p2.specialization
+                self.oracle_pool.append(child)
+        
+        # Мутация случайных оракулов (каждый 5-й)
+        for i, oracle in enumerate(self.oracle_pool):
+            if i % 5 == 0 and oracle.fitness > 0.3:
+                new_word = safe_mutate_oracle(oracle.word, rate=0.4)
+                if new_word != oracle.word:
+                    child = EvolutionaryOracle(new_word)
+                    child.specialization = oracle.specialization
+                    self.oracle_pool.append(child)
+
+    def enrich_tapes(self, env: str) -> None:
+        """Обогащение лент: вставляем целевую среду в ленты нескольких агентов."""
+        num_to_enrich = max(1, len(self.agents) // 5)  # 20% агентов
+        indices = random.sample(range(len(self.agents)), min(num_to_enrich, len(self.agents)))
+        for idx in indices:
+            # Вставляем среду в случайную позицию
+            pos = random.randint(0, len(self.agents[idx].tape))
+            self.agents[idx].tape = (self.agents[idx].tape[:pos] + 
+                                      env + 
+                                      self.agents[idx].tape[pos:])
+            # Ограничиваем длину
+            if len(self.agents[idx].tape) > 50:
+                self.agents[idx].tape = self.agents[idx].tape[:50]
+
+# ------------------------------------------------------------------
+# Генерация начального пула оракулов
+# ------------------------------------------------------------------
+def create_initial_oracle_pool(size: int = 15) -> List[EvolutionaryOracle]:
+    """Создаёт начальный пул оракулов."""
+    alphabet = "ABCDEFG<>"
+    pool = []
+    # Набор начальных слов (как в статье)
+    initial_words = ["A", "B", "C", "D", "E", "F", "<", ">", "AB", "BC", "CD", 
+                     "DE", "EF", "FG", "A<", ">B", "<B", "B>", "A>B", "D<E"]
+    
+    # Добавляем случайные слова
+    for _ in range(size):
+        if initial_words and random.random() < 0.7:
+            word = random.choice(initial_words)
+        else:
+            word = ''.join(random.choices(alphabet, k=random.randint(1, 3)))
+        pool.append(EvolutionaryOracle(word))
+    
+    return pool
+
+# ------------------------------------------------------------------
+# Запуск одного эксперимента (фаза 1 + фаза 2)
+# ------------------------------------------------------------------
+def run_single_experiment(seed: int, verbose: bool = False) -> dict:
+    """Запускает один полный эксперимент (30 эпох + 50 эпох)."""
+    random.seed(seed)
+    
+    # Параметры (как в статье)
+    START_TAPE = "A<B>C<D>E<F>G"
+    NUM_AGENTS = 12
+    INITIAL_ORACLES = 15
+    ENVIRONMENTS = ["cat", "dog", "bird", "fish", "tree", "house"]
+    
+    # Создаём агентов
+    agents = [Argonaut(START_TAPE) for _ in range(NUM_AGENTS)]
+    
+    # Создаём пул оракулов
+    oracle_pool = create_initial_oracle_pool(INITIAL_ORACLES)
+    
+    # Создаём машину
+    machine = ArgoMachine(agents, oracle_pool)
+    
+    # --- Фаза 1: 30 эпох обучения ---
+    phase1_success = 0
+    phase1_times = []
+    
+    for epoch in range(30):
+        # Выбираем среду из списка (циклически, как в статье)
+        env = ENVIRONMENTS[epoch % len(ENVIRONMENTS)]
+        
+        # Обогащение лент перед эпохой
+        machine.enrich_tapes(env)
+        
+        # Транспозиция перед эпохой (кроме первой)
+        if epoch > 0 and machine.last_winner is not None:
+            machine.transpose()
+        
+        # Поиск адаптации
+        max_steps = 50
+        adapted_step = None
+        for step in range(max_steps):
+            res = machine.step(env)
+            if res == "accept":
+                adapted_step = step + 1
+                phase1_success += 1
+                phase1_times.append(adapted_step)
+                break
+        
+        # Эволюция оракулов после эпохи
+        machine.evolve_oracles()
+        
+        if verbose and epoch % 5 == 0:
+            print(f"  Эпоха {epoch+1}: успех={adapted_step is not None}, оракулов={len(machine.oracle_pool)}")
+    
+    # --- Фаза 2: 50 эпох тестирования ---
+    phase2_success = 0
+    phase2_times = []
+    
+    for epoch in range(50):
+        env = ENVIRONMENTS[epoch % len(ENVIRONMENTS)]
+        
+        # Обогащение лент перед эпохой
+        machine.enrich_tapes(env)
+        
+        if epoch > 0 and machine.last_winner is not None:
+            machine.transpose()
+        
+        for step in range(50):
+            res = machine.step(env)
+            if res == "accept":
+                phase2_success += 1
+                phase2_times.append(step + 1)
+                break
+        
+        # Эволюция оракулов после каждой эпохи (как в статье)
+        machine.evolve_oracles()
+    
+    # Собираем статистику по оракулам
+    oracle_words = [o.word for o in machine.oracle_pool]
+    oracle_fitness = [o.fitness for o in machine.oracle_pool]
+    perfect_oracles = [o.word for o in machine.oracle_pool if o.fitness >= 1.0]
+    
+    return {
+        'seed': seed,
+        'phase1_success': phase1_success,
+        'phase1_times': phase1_times,
+        'phase2_success': phase2_success,
+        'phase2_times': phase2_times,
+        'oracle_pool_size': len(machine.oracle_pool),
+        'oracle_words': oracle_words,
+        'oracle_fitness': oracle_fitness,
+        'perfect_oracles': perfect_oracles,
+        'last_winner_tape': machine.last_winner.tape if machine.last_winner else None
+    }
+
+# ------------------------------------------------------------------
+# Многозапусковый анализ
+# ------------------------------------------------------------------
+def mean_ci(data, confidence=0.95):
+    """Возвращает (среднее, ст.откл., (нижняя, верхняя) ДИ)."""
+    if not data:
+        return None, None, (None, None)
+    n = len(data)
+    mean = statistics.mean(data)
+    stdev = statistics.stdev(data) if n > 1 else 0.0
+    # Используем нормальное приближение
+    z = 1.96
+    margin = z * stdev / (n ** 0.5) if n > 1 else 0
+    return mean, stdev, (mean - margin, mean + margin)
+
+def main():
+    import sys
+    
+    NUM_RUNS = 50
+    BASE_SEED = 42
+    
+    print(f"Запуск {NUM_RUNS} независимых экспериментов (базовый seed = {BASE_SEED})")
+    print("=" * 70)
+    
+    results = []
+    for i in range(NUM_RUNS):
+        seed = BASE_SEED + i
+        res = run_single_experiment(seed, verbose=False)
+        results.append(res)
+        sys.stdout.write(f"\rЗапуск {i+1}/{NUM_RUNS} ...")
+        sys.stdout.flush()
+    print("\nГотово.\n")
+    
+    # --- Статистика ---
+    phase1_success_rates = [r['phase1_success'] / 30 * 100 for r in results]
+    phase2_success_rates = [r['phase2_success'] / 50 * 100 for r in results]
+    
+    phase1_times_all = [t for r in results for t in r['phase1_times']]
+    phase2_times_all = [t for r in results for t in r['phase2_times']]
+    
+    oracle_pool_sizes = [r['oracle_pool_size'] for r in results]
+    perfect_oracles_count = [len(r['perfect_oracles']) for r in results]
+    
+    print("РЕЗУЛЬТАТЫ:")
+    print("-" * 50)
+    
+    m1, sd1, ci1 = mean_ci(phase1_success_rates)
+    print(f"Фаза 1 (30 эпох):")
+    print(f"  Успешность: {m1:.2f}% ± {sd1:.2f}%")
+    print(f"  95% ДИ: [{ci1[0]:.2f}%, {ci1[1]:.2f}%]")
+    
+    m2, sd2, ci2 = mean_ci(phase2_success_rates)
+    print(f"\nФаза 2 (50 эпох):")
+    print(f"  Успешность: {m2:.2f}% ± {sd2:.2f}%")
+    print(f"  95% ДИ: [{ci2[0]:.2f}%, {ci2[1]:.2f}%]")
+    
+    if phase1_times_all:
+        mt1, sdt1, cit1 = mean_ci(phase1_times_all)
+        print(f"\nВремя адаптации (Фаза 1): {mt1:.2f} ± {sdt1:.2f} шагов")
+        if cit1[0] is not None:
+            print(f"  95% ДИ: [{cit1[0]:.2f}, {cit1[1]:.2f}]")
+    
+    if phase2_times_all:
+        mt2, sdt2, cit2 = mean_ci(phase2_times_all)
+        print(f"\nВремя адаптации (Фаза 2): {mt2:.2f} ± {sdt2:.2f} шагов")
+        if cit2[0] is not None:
+            print(f"  95% ДИ: [{cit2[0]:.2f}, {cit2[1]:.2f}]")
+    
+    mo, sdo, cio = mean_ci(oracle_pool_sizes)
+    print(f"\nРазмер пула оракулов: {mo:.1f} ± {sdo:.1f}")
+    if cio[0] is not None:
+        print(f"  95% ДИ: [{cio[0]:.1f}, {cio[1]:.1f}]")
+    
+    print(f"\nСреднее число совершенных оракулов (fitness=1.0): {statistics.mean(perfect_oracles_count):.2f}")
+    print(f"  Максимум: {max(perfect_oracles_count)}")
+    
+    # --- Построение рисунка ---
+    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+    fig.suptitle(f"Статистика Argo10 по {NUM_RUNS} независимым запускам", fontsize=14)
+    
+    # (a) Гистограмма успешности в Фазе 1
+    ax = axes[0, 0]
+    ax.hist(phase1_success_rates, bins=10, color='skyblue', edgecolor='black', alpha=0.7)
+    ax.axvline(m1, color='red', linestyle='--', label=f'Среднее: {m1:.1f}%')
+    ax.set_xlabel('Успешность в Фазе 1 (%)')
+    ax.set_ylabel('Частота')
+    ax.set_title('Фаза 1 (30 эпох)')
+    ax.legend()
+    
+    # (b) Гистограмма успешности в Фазе 2
+    ax = axes[0, 1]
+    ax.hist(phase2_success_rates, bins=10, color='lightgreen', edgecolor='black', alpha=0.7)
+    ax.axvline(m2, color='red', linestyle='--', label=f'Среднее: {m2:.1f}%')
+    ax.set_xlabel('Успешность в Фазе 2 (%)')
+    ax.set_ylabel('Частота')
+    ax.set_title('Фаза 2 (50 эпох)')
+    ax.legend()
+    
+    # (c) Boxplot времени адаптации в Фазе 2
+    ax = axes[1, 0]
+    if phase2_times_all:
+        ax.boxplot([phase2_times_all], vert=True, patch_artist=True,
+                   boxprops=dict(facecolor='lightblue'))
+        ax.set_ylabel('Шаги до адаптации')
+        ax.set_title('Время адаптации в Фазе 2')
+        ax.set_xticklabels(['Все успешные эпохи'])
+    else:
+        ax.text(0.5, 0.5, 'Нет данных', ha='center', va='center')
+        ax.set_title('Время адаптации в Фазе 2')
+    
+    # (d) Scatter plot: успешность Фазы 2 против Фазы 1
+    ax = axes[1, 1]
+    ax.scatter(phase1_success_rates, phase2_success_rates, alpha=0.6)
+    ax.set_xlabel('Успешность Фазы 1 (%)')
+    ax.set_ylabel('Успешность Фазы 2 (%)')
+    ax.set_title('Корреляция между фазами')
+    
+    plt.tight_layout()
+    plt.savefig('argo10_correct_results.png', dpi=150, bbox_inches='tight')
+    print(f"\nРисунок сохранён как argo10_correct_results.png")
+    
+    # --- Вывод информации об оракулах из последнего запуска ---
+    last = results[-1]
+    print(f"\nИтоговый пул оракулов (последний запуск, seed={last['seed']}):")
+    print(f"  Размер пула: {last['oracle_pool_size']}")
+    print(f"  Совершенные оракулы (fitness=1.0): {last['perfect_oracles']}")
+    print(f"  Лента победителя: {last['last_winner_tape']}")
+    
+    # Возвращаем результаты для возможного дальнейшего анализа
+    return results
+
+if __name__ == "__main__":
+    results = main()

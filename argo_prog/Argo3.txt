@@ -1,0 +1,85 @@
+Epoch 1 | oracle='<~~>' | env='<~A'
+  adapted at step 1
+
+Epoch 2 | oracle='<~~' | env='A<~'
+  adapted at step 1
+
+Epoch 3 | oracle='<~~' | env='<~A'
+  adapted at step 1
+
+Epoch 4 | oracle='<~~' | env='A~<'
+  adapted at step 1
+
+Epoch 5 | oracle='<~~' | env='~<A'
+  adapted at step 1
+
+Epoch 6 | oracle='<~~' | env='<A~'
+  adapted at step 1
+
+Epoch 7 | oracle='<~~' | env='<A~'
+  adapted at step 1
+
+Epoch 8 | oracle='<~~' | env='<A~'
+  adapted at step 1
+
+Epoch 9 | oracle='<~~' | env='A~<'
+  adapted at step 1
+
+Epoch 10 | oracle='<~' | env='A~<'
+  adapted at step 1
+
+Epoch 11 | oracle='<~' | env='<A~'
+  adapted at step 1
+
+Epoch 12 | oracle='<~' | env='A~<'
+  adapted at step 1
+
+Epoch 13 | oracle='<~' | env='A<~'
+  adapted at step 1
+
+Epoch 14 | oracle='<~' | env='~<A'
+  adapted at step 1
+
+Epoch 15 | oracle='<~' | env='<A~'
+  adapted at step 1
+
+Epoch 16 | oracle='<~' | env='~A<'
+  adapted at step 1
+
+Epoch 17 | oracle='<~' | env='<A~'
+  adapted at step 1
+
+Epoch 18 | oracle='<~' | env='~<A'
+  adapted at step 1
+
+Epoch 19 | oracle='<~' | env='<~A'
+  adapted at step 1
+
+Epoch 20 | oracle='<~' | env='~A<'
+  adapted at step 1
+
+Epoch 0 ...
+
+Epoch 100 ...
+
+Epoch 200 ...
+
+Epoch 300 ...
+
+Epoch 400 ...
+
+Epoch 500 ...
+
+Epoch 600 ...
+
+Epoch 700 ...
+
+Epoch 800 ...
+
+Epoch 900 ...
+
+------ статистика ------
+среднее : 1
+макс    : 1
+метаст  : 0 из 1000
+
