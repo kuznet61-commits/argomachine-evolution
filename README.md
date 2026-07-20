@@ -21,5 +21,5 @@ See individual README files in each subdirectory.
 
 ## Citation
 Kuznetsov, A.V. (2026). Evolutionary Dynamics of the ArgoMachine. 
-Zenodo. https://doi.org/10.5281/zenodo.XXXXXXX# argomachine-evolution
+Zenodo. https://doi.org/10.5281/zenodo.21451913 argomachine-evolution
 Oracle-guided evolutionary dynamics computational model
